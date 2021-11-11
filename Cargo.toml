@@ -1,0 +1,19 @@
+[package]
+name = "socks"
+version = "0.1.0"
+edition = "2021"
+authors = ["Avrilko <avrilko@qq.com>"]
+description = "fast socks5"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+bytes = "1.1.0"
+dirs = "4.0.0"
+tracing = "0.1.29"
+tracing-futures = "0.2.5"
+tracing-subscriber = "0.3.1"
+structopt = "0.3.25"
+serde_json = "1.0"
+serde = { version = "1.0.130", features = ["derive"] }
