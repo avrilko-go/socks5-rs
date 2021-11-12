@@ -1,6 +1,6 @@
+use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::str::FromStr;
-use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ClientConf {
@@ -13,10 +13,11 @@ pub struct ClientConf {
 
 impl ClientConf {
     pub fn to_listen_addr(&self) -> SocketAddr {
-        format!("{}:{}", self.listen_addr, self.port).parse().unwrap()
+        format!("{}:{}", self.listen_addr, self.port)
+            .parse()
+            .unwrap()
     }
 }
-
 
 impl FromStr for ClientConf {
     type Err = serde_json::Error;
@@ -25,4 +26,3 @@ impl FromStr for ClientConf {
         serde_json::from_str(s)
     }
 }
-
