@@ -1,15 +1,16 @@
-use crate::client::connection::Connection;
 use crate::conf::ClientConf;
 use crate::shutdown::Shutdown;
 use crate::{Result};
 use crate::MAX_CONNECTIONS;
 use std::future::Future;
+use std::net::ToSocketAddrs;
 use std::sync::Arc;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{broadcast, mpsc, Semaphore};
 use tracing::{info, error};
+use bytes::Buf;
 
-pub mod connection;
 
 #[derive(Debug)]
 pub struct Client {
@@ -27,13 +28,13 @@ impl Client {
 
         loop {
             self.max_connections.acquire().await.unwrap().forget();
-            let socket = self.accept().await.unwrap();
+            let stream = self.accept().await.unwrap();
 
             let mut handler = Handler {
-                connection: Connection::new(socket),
                 max_connections: self.max_connections.clone(),
                 shutdown: Shutdown::new(self.shutdown_notify.subscribe()),
                 _shutdown_complete_s: self.shutdown_complete_s.clone(),
+                stream
             };
 
             tokio::spawn(async move {
@@ -66,7 +67,7 @@ impl Client {
 
 #[derive(Debug)]
 struct Handler {
-    connection: Connection,
+    stream: TcpStream,
     max_connections: Arc<Semaphore>,
     shutdown: Shutdown,
     _shutdown_complete_s: mpsc::Sender<()>,
@@ -74,11 +75,54 @@ struct Handler {
 
 impl Handler {
     pub async fn run(&mut self) -> Result<()> {
-        tokio::select! {
-            _ = tokio::time::sleep(tokio::time::Duration::from_secs(2)) => {}
-            _ = self.shutdown.recv() => {}
+        let mut header = [0;3];
+        self.stream.read(&mut header).await?;
+        if header[0] != 5 {
+            return Err("only support socks5".into())
         }
-        Ok(())
+        self.stream.write_u8(5).await?;
+        self.stream.write_u8(0).await?;
+        self.stream.flush().await?;
+        let mut header = [0;256];
+        let n = self.stream.read(&mut header).await?;
+        let header = &header[..n];
+        match header[3] {
+            3 => {
+                let mut port = &header[n-2..];
+                let port = port.get_u16();
+                let domain = std::str::from_utf8(&header[5..n-2]).unwrap();
+                let addr = format!("{}:{}",domain,port).to_socket_addrs()?.next().unwrap();
+                let mut remote = TcpStream::connect(addr).await?;
+                let mut ack = [0x05, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+                self.stream.write(&mut ack).await?;
+                self.stream.flush().await?;
+
+                let (mut lr,mut lw) = self.stream.split();
+                let (mut rr,mut rw) = remote.split();
+                let client_to_server = async {
+                    tokio::io::copy(&mut lr,&mut rw).await
+                };
+
+                let server_to_client = async {
+                    tokio::io::copy(&mut rr,&mut lw).await
+                };
+
+                tokio::select! {
+                    _ = client_to_server => {}
+                    _ = server_to_client => {}
+                    _ = self.shutdown.recv() => {
+                        info!("receive quit signal");
+                    }
+                    _ = tokio::time::sleep(tokio::time::Duration::from_secs(10)) => {
+                        info!("on connection timeout");
+                    }
+                };
+                Ok(())
+            }
+            _ => {
+                return Err("only support domain".into());
+            }
+        }
     }
 }
 
@@ -122,7 +166,14 @@ pub async fn run(listener: TcpListener, shutdown: impl Future, conf: ClientConf)
     drop(shutdown_notify);
     drop(shutdown_complete_s);
 
-    // 等待所有的task处理完任务再退出
-    let _ = shutdown_complete_r.recv().await;
+    tokio::select! {
+        _ = tokio::time::sleep(tokio::time::Duration::from_secs(10))=> {
+            info!("timeout wait conn quit");
+        }
+
+        _ = shutdown_complete_r.recv() =>  {
+            info!("normal quit");
+        }
+    }
     info!("shutdown complete");
 }
