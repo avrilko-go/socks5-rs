@@ -12,7 +12,7 @@ async fn main() -> Result<()> {
     let conf_path = cli.conf_path.unwrap_or_else(|| {
         dirs::home_dir()
             .unwrap()
-            .join("config.json")
+            .join("config_client.json")
             .to_str()
             .unwrap()
             .to_string()

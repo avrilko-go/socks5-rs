@@ -1,35 +1,36 @@
-use async_recursion::async_recursion;
-use std::collections::HashMap;
-use std::result::Result::Ok;
-use std::sync::{Arc, Mutex};
+use socks::server::{run};
+use socks::conf::{ServerConf};
+use socks::Result;
+use structopt::StructOpt;
+use tokio::net::TcpListener;
+use tokio::signal::ctrl_c;
+use socks::cipher::Cipher;
+use tracing::info;
 
 #[tokio::main]
-async fn main() {
-    let h = Arc::new(Mutex::new(HashMap::new()));
-    read_name("/home/avrilko/web/fol.2345.net/models", h.clone()).await;
-
-    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-
-    dbg!("{}", h);
+async fn main() -> Result<()> {
+    tracing_subscriber::fmt().try_init()?;
+    let cli = Cli::from_args();
+    let conf_path = cli.conf_path.unwrap_or_else(|| {
+        dirs::home_dir()
+            .unwrap()
+            .join("config_server.json")
+            .to_str()
+            .unwrap()
+            .to_string()
+    });
+    let content = tokio::fs::read_to_string(conf_path).await?;
+    let conf: ServerConf = content.parse()?;
+    let listener = TcpListener::bind(conf.to_listen_addr()).await?;
+    let password = Cipher::rand_password();
+    info!("password: {}",password);
+    run(listener, ctrl_c(), password).await;
+    Ok(())
 }
 
-#[async_recursion]
-async fn read_name(path: &str, h: Arc<Mutex<HashMap<String, i32>>>) {
-    let mut dirs = tokio::fs::read_dir(path).await.unwrap();
-
-    while let Ok(Some(dir)) = dirs.next_entry().await {
-        let path = dir.path();
-        let meta = tokio::fs::metadata(&path).await.unwrap();
-        if meta.is_dir() {
-            let copy = h.clone();
-            tokio::spawn(async move { read_name(path.to_str().unwrap(), copy).await });
-        } else {
-            let mut ddd = h.lock().unwrap();
-            if ddd.contains_key(path.to_str().unwrap()) {
-                ddd.insert(path.to_str().unwrap().to_string(), 2);
-            } else {
-                ddd.insert(path.to_str().unwrap().to_string(), 1);
-            }
-        }
-    }
+#[derive(Debug, StructOpt)]
+#[structopt(name = "socks5 server", version = env ! ("CARGO_PKG_VERSION"), author = env ! ("CARGO_PKG_AUTHORS"), about = env ! ("CARGO_PKG_DESCRIPTION"))]
+struct Cli {
+    #[structopt(name = "conf path", short = "c", long = "conf")]
+    conf_path: Option<String>,
 }
