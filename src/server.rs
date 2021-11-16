@@ -73,6 +73,13 @@ struct Handler {
     cipher: Arc<Cipher>,
 }
 
+impl Drop for Handler {
+    fn drop(&mut self) {
+        info!("connection quit");
+        self.max_connections.add_permits(1);
+    }
+}
+
 impl Handler {
     pub async fn run(&mut self) -> Result<()> {
         let mut header = [0; 3];
@@ -147,6 +154,7 @@ impl Handler {
                     _ = client_to_server => {}
                     _ = server_to_client => {}
                     _ = self.shutdown.recv() => {}
+                    _ = tokio::time::sleep(tokio::time::Duration::from_secs(10)) => {}
                 }
                 Ok(())
             }
