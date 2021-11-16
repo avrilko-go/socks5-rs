@@ -154,7 +154,6 @@ impl Handler {
                     _ = client_to_server => {}
                     _ = server_to_client => {}
                     _ = self.shutdown.recv() => {}
-                    _ = tokio::time::sleep(tokio::time::Duration::from_secs(10)) => {}
                 }
                 Ok(())
             }
